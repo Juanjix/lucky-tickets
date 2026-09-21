@@ -1,0 +1,248 @@
+# Architecture
+
+**Status:** RFC-002 — Database Schema & Multi-Tenant Security. The domain
+schema, tenant isolation, and RLS now exist as migrations — see
+[docs/database.md](database.md) for the full database design. No auth UI or
+business flow exists yet. This document describes the direction the
+codebase is built to grow into, and the conventions already in force.
+
+## Product architecture
+
+Lucky Ticket is a multi-tenant platform for independent event organizers. The
+tenant is an **Organization**, not a User. The long-term core domain chain is:
+
+```text
+User
+  → Organization Membership
+    → Organization
+      → Event
+        → Order
+          → Payment
+        → Ticket
+          → Check-in
+```
+
+An Organization also owns two side chains that stay decoupled from the core
+sales flow so they can evolve independently:
+
+```text
+Organization → Audience   (customer/attendee database, built from Orders)
+Organization → Billing    (platform fees, invoicing, settlements)
+```
+
+These tables now exist as migrations (`supabase/migrations/`), with Row
+Level Security enforcing tenant isolation at the database level — see
+[docs/database.md](database.md) for the full schema, RLS strategy, and
+decision log. No application code queries them yet.
+
+## Architectural principles
+
+**Multi-tenancy.** Every domain table introduced from RFC-002 onward hangs
+off `Organization`, and every query is scoped to the caller's organization —
+enforced by Postgres Row Level Security (RLS), not by application code
+remembering to filter. Application code is a second line of defense, not the
+first.
+
+**Server-authoritative operations.** The browser is never trusted for prices,
+availability, payment state, permissions, ticket validity, check-in state, or
+billing math. Those computations happen in Server Actions, Route Handlers, or
+the database itself; the client only renders what the server returns.
+
+**Domain separation.** Order, Payment, Ticket, Check-in, and Billing are
+separate concerns even though they're causally related (an Order leads to a
+Payment leads to Tickets). They will live as separate tables and separate
+`features/*` modules so that, for example, a change to how check-ins work
+can't accidentally alter payment state.
+
+**Provider abstraction.** External services are wrapped behind an interface
+owned by this codebase, not called directly from feature code. The shape to
+follow, once a real provider is introduced:
+
+```text
+PaymentGateway (interface, owned by us)
+  └── MercadoPagoGateway (implementation, in services/)
+```
+
+The same applies to email, storage, and analytics providers when they
+arrive. Feature code depends on the interface; only one adapter module
+depends on the vendor SDK.
+
+**RLS.** Postgres Row Level Security is the source of truth for "can this
+request see or change this row," scoped by organization membership.
+Introduced in RFC-002 alongside the schema it protects.
+
+**Idempotency for future financial operations.** Payment webhooks and any
+operation that moves money will be designed to be safely retried (an
+idempotency key per operation) once they exist — noted here so the schema in
+RFC-002 can accommodate it, not implemented now.
+
+**Mobile-first operational UI.** The dashboard (door check-in, guest lists,
+live sales) is used from phones during live events. When the dashboard is
+built, layouts start at phone width and scale up, not the reverse.
+
+**Business logic outside components.** React components handle presentation
+and interaction. Domain rules, validation, and side effects live in
+`features/*`, `services/`, `lib/`, and server-side functions — never
+hardcoded into a component tree.
+
+## Directory responsibilities
+
+```text
+src/
+├── app/          Routing, layouts, pages, Route Handlers (App Router).
+├── components/
+│   └── ui/       Reusable, presentation-only primitives. No business logic.
+├── features/     Business capabilities grouped by domain (events, orders,
+│                 ticketing, ...). Empty until RFC-002+ adds a domain.
+├── lib/          Infrastructure and framework integration.
+│   ├── env/      Zod-validated environment access, split public/server.
+│   ├── supabase/ SSR-safe Supabase client factories + session refresh.
+│   └── errors/   Shared AppError model (see below).
+├── services/     Cross-cutting, provider-facing services (e.g. a future
+│                 PaymentGateway implementation). Empty until a provider
+│                 is introduced.
+├── types/        Truly shared TypeScript types used across features.
+│                 Empty until something is actually shared.
+└── config/       App-level, non-secret configuration (e.g. site identity).
+```
+
+Two folders — `lib/auth/` and `lib/validation/` — are intentionally not
+created yet. There's no authentication flow to support and no feature
+validation to place. When RFC-002+ adds them: `lib/validation/` holds
+shared Zod schema conventions, and each trust boundary (a form, a Route
+Handler, a webhook payload, a query parameter) validates its own input with
+Zod at that boundary — TypeScript types are compile-time only and do not
+substitute for runtime validation. `lib/auth/` holds session/auth helpers
+once an authentication flow exists.
+
+Conceptual route groups — `(marketing)`, `(public)`, `(auth)`, `dashboard`,
+`api` — are planned but not created as empty folders; they appear when the
+first route in each group is built, per Next.js App Router route group
+conventions.
+
+## Dependency rule
+
+```text
+UI (app/, components/)
+  ↓
+Feature / application layer (features/)
+  ↓
+Domain / service logic (services/, lib/)
+  ↓
+Infrastructure / providers (Supabase, future payment/email SDKs)
+```
+
+Dependencies point downward only. A provider SDK (Supabase, and later
+Mercado Pago, an email provider, etc.) is never imported directly from
+`app/` or `features/` — it's reached through the `lib/` or `services/`
+module that wraps it. This is what keeps a provider swap a localized change.
+
+## Server/client boundaries
+
+Server Components are the default. `"use client"` is added only where
+browser APIs, local interactive state, effects, or a client-only library
+require it — not by convention or convenience.
+
+`src/lib/env/server.ts` and `src/lib/supabase/server.ts` import the
+`server-only` package, so importing either from a Client Component fails
+the build instead of silently shipping server code (or a future secret) to
+the browser. `src/lib/env/client.ts` is the only place `NEXT_PUBLIC_*`
+values are read, and only those two files exist for environment access —
+feature code imports from them rather than reading `process.env` directly.
+
+## Supabase foundation
+
+Two client factories, following the current official `@supabase/ssr`
+pattern for Next.js App Router (verified against the installed `@supabase/ssr`
+0.12.7 types, since this API has changed across versions):
+
+- `src/lib/supabase/client.ts` — `createBrowserClient` for Client Components.
+- `src/lib/supabase/server.ts` — `createServerClient` for Server Components,
+  Server Actions, and Route Handlers, reading/writing cookies via
+  `next/headers`. Create a new instance per request; never share one.
+- `src/lib/supabase/proxy.ts` + `src/proxy.ts` — refreshes the auth session
+  on every request per Next.js's Proxy convention (the file Next.js 16
+  renamed from `middleware.ts`). This is token refresh only — it does not
+  redirect unauthenticated users or check permissions. Per Next.js's own
+  guidance, a Proxy matcher can silently stop covering a route (e.g. a
+  Server Action moved to a different path), so real authorization must be
+  re-verified inside each Server Action / Route Handler regardless of
+  Proxy having run.
+
+No business tables, RLS policies, or auth UI exist yet — this is
+connectivity plumbing only.
+
+### Lazy env validation
+
+`getClientEnv()` / `getServerEnv()` (in `src/lib/env/`) validate on call, not
+on import — importing either module doesn't itself require configuration.
+This matters because `src/proxy.ts` runs on nearly every request: it calls
+`isServerEnvConfigured()` first and, when Supabase hasn't been configured
+yet, skips session refresh and lets the request through rather than
+crashing every page in the app (there's no auth flow yet for it to
+protect). `lib/supabase/client.ts` and `server.ts` still call the throwing
+`get*Env()` the moment something actually tries to construct a Supabase
+client without configuration, so misconfiguration is never silent — it
+just isn't fatal for parts of the app that don't need Supabase.
+
+### Environment variables
+
+| Variable                               | Exposure | Purpose                                             |
+| -------------------------------------- | -------- | --------------------------------------------------- |
+| `NEXT_PUBLIC_SUPABASE_URL`             | Public   | Supabase project URL                                |
+| `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | Public   | Publishable API key (RLS-protected, safe to expose) |
+
+**Naming decision:** Supabase's current documentation (checked live, since
+this key has been renamed before) uses `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`
+in place of the older `NEXT_PUBLIC_SUPABASE_ANON_KEY`. This codebase follows
+that current convention — see ADR-006.
+
+Future server-only secrets (a service-role key, a payment provider's API
+key) are added to `src/lib/env/server.ts` and `.env.example`, unprefixed,
+never to `client.ts`.
+
+## Error handling convention
+
+`src/lib/errors/app-error.ts` defines `AppError`, a small typed wrapper
+distinguishing `validation | authentication | authorization | not_found |
+conflict | external_provider | internal`, each with a default HTTP status
+and a `publicMessage` getter that never leaks internal detail for the two
+kinds (`external_provider`, `internal`) where the real message might
+describe internal state. This is a convention for later Route Handlers and
+Server Actions to adopt — no business error is thrown anywhere yet.
+
+## Decision log (ADRs)
+
+**ADR-001: Next.js App Router.** Chosen for co-located Server Components,
+Route Handlers, and the Proxy convention this project relies on for
+session refresh. Alternative considered: Pages Router — rejected, it's the
+legacy model for new Next.js projects.
+
+**ADR-002: Supabase as database/auth platform.** Gives Postgres, RLS,
+and auth in one product, which fits the "RLS as source of truth for
+tenant isolation" principle directly instead of building it from scratch.
+
+**ADR-003: Organization-based multi-tenancy.** The tenant is `Organization`,
+not `User`, because a person can belong to more than one producer/venue and
+permissions are scoped per-organization, not per-account.
+
+**ADR-004: Server-authoritative business operations.** Ticketing handles
+money and access control; client-computed prices, availability, or
+permissions are trivially spoofable, so every sensitive computation is
+re-derived server-side.
+
+**ADR-005: Provider abstraction.** Payment, email, storage, and analytics
+providers are wrapped behind an interface owned by this codebase (see
+`services/`) so a provider swap doesn't ripple through feature code, and so
+integration tests can substitute a fake implementation later.
+
+**ADR-006: `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` over `..._ANON_KEY`.**
+Supabase's current documentation names the public client key
+`PUBLISHABLE_KEY`. This project uses that name rather than the older
+`ANON_KEY` convention some existing tutorials still reference, to match
+what Supabase actually issues today.
+
+**ADR-007: Proxy (`src/proxy.ts`) instead of `middleware.ts`.** Next.js 16
+deprecated and renamed the middleware file convention to `proxy.ts`,
+exporting `proxy` instead of `middleware`. This project targets Next.js 16
+and uses the current name.
