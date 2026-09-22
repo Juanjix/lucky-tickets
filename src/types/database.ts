@@ -1058,6 +1058,26 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      create_organization: {
+        Args: { p_name: string; p_slug: string; p_timezone?: string }
+        Returns: {
+          created_at: string
+          currency: string
+          id: string
+          logo_url: string | null
+          name: string
+          slug: string
+          status: Database["public"]["Enums"]["organization_status"]
+          timezone: string
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "organizations"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       has_organization_role: {
         Args: {
           allowed_roles: Database["public"]["Enums"]["organization_role"][]

@@ -1,10 +1,14 @@
 # Architecture
 
-**Status:** RFC-002 — Database Schema & Multi-Tenant Security. The domain
-schema, tenant isolation, and RLS now exist as migrations — see
-[docs/database.md](database.md) for the full database design. No auth UI or
-business flow exists yet. This document describes the direction the
-codebase is built to grow into, and the conventions already in force.
+**Status:** RFC-003 — Authentication & Organizations. Sign-up/sign-in/sign-out,
+organization creation and membership, tenant-scoped dashboard routing, and
+server-side authorization helpers now exist — see
+[docs/rfcs/RFC-003-auth-organizations.md](rfcs/RFC-003-auth-organizations.md)
+for the full design. The domain schema, tenant isolation, and RLS
+(RFC-002) are documented in [docs/database.md](database.md). No event
+management or business flow beyond auth/tenancy exists yet. This document
+describes the direction the codebase is built to grow into, and the
+conventions already in force.
 
 ## Product architecture
 
@@ -33,7 +37,11 @@ Organization → Billing    (platform fees, invoicing, settlements)
 These tables now exist as migrations (`supabase/migrations/`), with Row
 Level Security enforcing tenant isolation at the database level — see
 [docs/database.md](database.md) for the full schema, RLS strategy, and
-decision log. No application code queries them yet.
+decision log. RFC-003 is the first application code to actually query
+them: authentication, organization creation/membership, and tenant-scoped
+dashboard routing — see
+[docs/rfcs/RFC-003-auth-organizations.md](rfcs/RFC-003-auth-organizations.md).
+Event management and everything past auth/tenancy still queries nothing.
 
 ## Architectural principles
 
@@ -92,8 +100,11 @@ src/
 ├── app/          Routing, layouts, pages, Route Handlers (App Router).
 ├── components/
 │   └── ui/       Reusable, presentation-only primitives. No business logic.
-├── features/     Business capabilities grouped by domain (events, orders,
-│                 ticketing, ...). Empty until RFC-002+ adds a domain.
+├── features/     Business capabilities grouped by domain. `auth/` and
+│                 `organizations/` exist as of RFC-003 (schemas, Server
+│                 Actions, components, and — for organizations — a
+│                 `server/` subfolder for RLS-backed read helpers). Events,
+│                 ticketing, etc. arrive with the RFCs that need them.
 ├── lib/          Infrastructure and framework integration.
 │   ├── env/      Zod-validated environment access, split public/server.
 │   ├── supabase/ SSR-safe Supabase client factories + session refresh.
@@ -106,19 +117,31 @@ src/
 └── config/       App-level, non-secret configuration (e.g. site identity).
 ```
 
-Two folders — `lib/auth/` and `lib/validation/` — are intentionally not
-created yet. There's no authentication flow to support and no feature
-validation to place. When RFC-002+ adds them: `lib/validation/` holds
-shared Zod schema conventions, and each trust boundary (a form, a Route
-Handler, a webhook payload, a query parameter) validates its own input with
-Zod at that boundary — TypeScript types are compile-time only and do not
-substitute for runtime validation. `lib/auth/` holds session/auth helpers
-once an authentication flow exists.
+`lib/auth/` exists as of RFC-003: `require-user.ts`
+(`requireUser`/`getOptionalUser`), `require-organization.ts`
+(`requireOrganizationMembership`/`requireOrganizationRole`), and
+`auth-errors.ts` (mapping Supabase auth errors to safe user-facing
+messages). These are the one way application code establishes identity and
+tenant authorization — see
+[docs/rfcs/RFC-003-auth-organizations.md](rfcs/RFC-003-auth-organizations.md).
 
-Conceptual route groups — `(marketing)`, `(public)`, `(auth)`, `dashboard`,
-`api` — are planned but not created as empty folders; they appear when the
-first route in each group is built, per Next.js App Router route group
-conventions.
+`lib/validation/` is still intentionally not created — RFC-003's Zod
+schemas live next to the feature that owns them
+(`features/auth/schemas.ts`, `features/organizations/schemas.ts`) because
+nothing yet needs schema conventions shared _across_ features. When
+something does, `lib/validation/` holds that shared convention; each trust
+boundary (a form, a Route Handler, a webhook payload, a query parameter)
+validates its own input with Zod regardless — TypeScript types are
+compile-time only and do not substitute for runtime validation.
+
+`dashboard/[organizationSlug]/` exists as of RFC-003 — every tenant-scoped
+route lives under it, resolved and authorized by that segment's `layout.tsx`
+(see the RFC-003 doc's "Tenant resolution"). `login/`, `signup/`, and
+`onboarding/` are top-level routes, not grouped, since there's no shared
+layout need yet beyond the root one. Conceptual route groups —
+`(marketing)`, `(public)`, `api` — remain planned but not created as empty
+folders; they appear when the first route in each actually needs one, per
+Next.js App Router route group conventions.
 
 ## Dependency rule
 
@@ -169,8 +192,19 @@ pattern for Next.js App Router (verified against the installed `@supabase/ssr`
   re-verified inside each Server Action / Route Handler regardless of
   Proxy having run.
 
-No business tables, RLS policies, or auth UI exist yet — this is
-connectivity plumbing only.
+As of RFC-003, both factories are parameterized with the generated
+`Database` type (`createBrowserClient<Database>`, `createServerClient<Database>` —
+see `src/types/database.ts`), so every `.from()`/`.rpc()` call is checked
+against the real schema. This is a completion of the existing abstraction,
+not a replacement of it: the factories, their signatures, and their
+call sites are otherwise unchanged from RFC-001.
+
+Authentication and tenant-scoped authorization are built on top of these
+same two factories — `src/lib/auth/require-user.ts` and
+`require-organization.ts` — rather than a second client or a different
+session mechanism. See
+[docs/rfcs/RFC-003-auth-organizations.md](rfcs/RFC-003-auth-organizations.md)
+"Authorization helpers".
 
 ### Lazy env validation
 
@@ -246,3 +280,29 @@ what Supabase actually issues today.
 deprecated and renamed the middleware file convention to `proxy.ts`,
 exporting `proxy` instead of `middleware`. This project targets Next.js 16
 and uses the current name.
+
+**ADR-008: Authorization lives in Server Components/Actions, not the
+Proxy.** RFC-003 added `requireUser`/`requireOrganizationMembership`/
+`requireOrganizationRole`, called directly from every protected route and
+action, rather than extending `src/proxy.ts` to redirect unauthenticated or
+unauthorized requests. Keeps exactly one place authorization logic can
+live, consistent with `src/lib/supabase/proxy.ts`'s own pre-existing
+comment that a Proxy matcher can silently stop covering a route and real
+authorization must be re-verified per Server Action/Route Handler
+regardless. A second, proxy-level check would be redundant at best and a
+second place to fall out of sync at worst.
+
+**ADR-009: Atomic organization creation via a `SECURITY INVOKER` RPC, not
+two client-side inserts.** See
+[docs/rfcs/RFC-003-auth-organizations.md](rfcs/RFC-003-auth-organizations.md)
+"Organization creation" for the full reasoning: two separate PostgREST
+calls cannot be made atomic from the client, and a partially-failed
+organization-without-owner is unrecoverable under RFC-002's own RLS
+policies. `SECURITY INVOKER` (not `DEFINER`) means the function still runs
+under the caller's RLS rather than bypassing it.
+
+**ADR-010: 404, not 403, for both "no such organization" and "not a
+member."** `requireOrganizationMembership` deliberately can't distinguish
+these two cases to the client, extending RFC-002's tenant-invisibility
+guarantee (docs/database.md "Tenant boundary") to the application/routing
+layer. A 403 would itself confirm a slug belongs to a real organization.

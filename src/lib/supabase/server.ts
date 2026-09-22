@@ -4,6 +4,7 @@ import { cookies } from "next/headers";
 import { createServerClient } from "@supabase/ssr";
 
 import { getServerEnv } from "@/lib/env/server";
+import type { Database } from "@/types/database";
 
 /**
  * Supabase client for use in Server Components, Server Actions, and Route
@@ -19,7 +20,7 @@ export async function createClient() {
   const cookieStore = await cookies();
   const serverEnv = getServerEnv();
 
-  return createServerClient(
+  return createServerClient<Database>(
     serverEnv.NEXT_PUBLIC_SUPABASE_URL,
     serverEnv.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY,
     {
@@ -40,3 +41,11 @@ export async function createClient() {
     },
   );
 }
+
+/**
+ * The type of the client `createClient()` resolves to. Use this to type a
+ * parameter accepting an already-created server client (e.g. a shared
+ * helper called from several Server Actions) instead of re-deriving it
+ * inline at each call site.
+ */
+export type SupabaseServerClient = Awaited<ReturnType<typeof createClient>>;

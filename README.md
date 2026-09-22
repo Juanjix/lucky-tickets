@@ -6,15 +6,19 @@ first module of a longer-term "operating system for independent events"
 (check-in, guest lists, audience database, billing, and more, added
 incrementally).
 
-**Current implementation stage: RFC-002 — Database Schema & Multi-Tenant
-Security**
+**Current implementation stage: RFC-003 — Authentication & Organizations**
 
 RFC-001 established the technical foundation (Next.js, Supabase client
-plumbing). RFC-002 adds the full database schema, tenant isolation, and Row
-Level Security as Supabase migrations — no application code queries it yet.
-See [docs/architecture.md](docs/architecture.md) for the application
-architecture and [docs/database.md](docs/database.md) for the database
-design, security model, and decision log.
+plumbing). RFC-002 added the full database schema, tenant isolation, and Row
+Level Security as Supabase migrations. RFC-003 adds authentication
+(sign-up/sign-in/sign-out), organization creation, multi-organization
+membership, and tenant-scoped dashboard routing — the first application
+code to actually query the RFC-002 schema. See
+[docs/architecture.md](docs/architecture.md) for the application
+architecture, [docs/database.md](docs/database.md) for the database
+design, security model, and decision log, and
+[docs/rfcs/RFC-003-auth-organizations.md](docs/rfcs/RFC-003-auth-organizations.md)
+for the auth/tenancy design.
 
 ## Stack
 
@@ -56,13 +60,15 @@ With Docker running:
 
 ```bash
 npx supabase start      # local Postgres + Auth + Studio, applies migrations
-npx supabase test db    # runs the pgTAP security/integrity suite
+npx supabase test db    # runs the pgTAP suite (33 assertions: RFC-002 + RFC-003)
 npx supabase gen types typescript --local > src/types/database.ts
 ```
 
-See [docs/database.md](docs/database.md) for the schema, tenant-isolation
-strategy, RLS policies, and how this was verified in an environment without
-Docker registry access.
+See [docs/database.md](docs/database.md) for the RFC-002 schema,
+tenant-isolation strategy, and RLS policies; see
+[docs/rfcs/RFC-003-auth-organizations.md](docs/rfcs/RFC-003-auth-organizations.md)
+for the `create_organization` migration RFC-003 adds on top, and how both
+were verified in an environment without Docker registry access.
 
 ## Environment variables
 
@@ -141,3 +147,27 @@ routes, ticket issuance, QR generation/scanning, the atomic door check-in
 function, emails, guest-list/audience UI, billing calculation, or
 settlement generation. Only database primitives exist — no product flow
 reads or writes these tables yet.
+
+## What RFC-003 includes
+
+- Email/password sign-up, sign-in, and sign-out via Supabase Auth, using
+  the RFC-001 `@supabase/ssr` client factories (now typed with the
+  generated `Database` type)
+- Organization creation with atomic OWNER provisioning, via a new
+  `create_organization` database function/migration
+- Multi-organization membership and a routing-only organization switcher
+- Tenant-scoped `/dashboard/[organizationSlug]` routes, protected by
+  reusable server-side authorization helpers (`requireUser`,
+  `requireOrganizationMembership`, `requireOrganizationRole`) backed by
+  RFC-002's RLS as the final boundary
+- A deterministic redirect map (unauthenticated → login, authenticated
+  without an organization → onboarding, etc.) with no redirect loops
+- 11 new pgTAP assertions covering the new migration (33 total with RFC-002)
+- [docs/rfcs/RFC-003-auth-organizations.md](docs/rfcs/RFC-003-auth-organizations.md)
+
+## What RFC-003 intentionally does NOT include
+
+No event management, ticket types, checkout, Mercado Pago, orders, tickets,
+QR generation, door/check-in, guest lists, billing, email delivery, merch,
+promoters, analytics, OAuth providers, invitations, or team-member-management
+UI. Those arrive in RFC-004 and later.
