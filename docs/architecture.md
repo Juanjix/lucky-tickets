@@ -107,11 +107,21 @@ src/
 │                 exists as of RFC-004 (schemas, Server Actions, components,
 │                 `queries.ts`, `permissions.ts`, and `publish-rules.ts` —
 │                 the centralized publication invariants RFC-005/RFC-006
-│                 are expected to reuse). Ticketing, checkout, etc. arrive
-│                 with the RFCs that need them.
+│                 reuse). `events/public/` exists as of RFC-005: a
+│                 deliberately separate read boundary (`queries.ts`,
+│                 `types.ts`, `availability.ts`, `format.ts`, `components/`)
+│                 for the anonymous buyer-facing page — its DTOs are never
+│                 the organizer-facing `Tables<"events">` row type, and its
+│                 one exported query (`getPublicEvent`) is the only thing
+│                 allowed to use `lib/supabase/public.ts`. Ticketing,
+│                 checkout, etc. arrive with the RFCs that need them.
 ├── lib/          Infrastructure and framework integration.
 │   ├── env/      Zod-validated environment access, split public/server.
-│   ├── supabase/ SSR-safe Supabase client factories + session refresh.
+│   ├── supabase/ SSR-safe Supabase client factories + session refresh, plus
+│   │             (RFC-005) `public.ts` — a cookie-less client that always
+│   │             authenticates as `anon`, for the one public route.
+│   ├── money.ts  Integer-minor-units helpers (RFC-004) — shared by the
+│   │             organizer dashboard and the public page.
 │   └── errors/   Shared AppError model (see below).
 ├── services/     Cross-cutting, provider-facing services (e.g. a future
 │                 PaymentGateway implementation). Empty until a provider
@@ -142,10 +152,15 @@ compile-time only and do not substitute for runtime validation.
 route lives under it, resolved and authorized by that segment's `layout.tsx`
 (see the RFC-003 doc's "Tenant resolution"). `login/`, `signup/`, and
 `onboarding/` are top-level routes, not grouped, since there's no shared
-layout need yet beyond the root one. Conceptual route groups —
-`(marketing)`, `(public)`, `api` — remain planned but not created as empty
-folders; they appear when the first route in each actually needs one, per
-Next.js App Router route group conventions.
+layout need yet beyond the root one. `e/[organizationSlug]/[eventSlug]/`
+exists as of RFC-005 — the one public, unauthenticated route, deliberately
+outside `dashboard/` (no session/tenant resolution applies to it, and
+never will) and given its own short top-level segment rather than a
+`(public)` route group, since it is the only public route today and a
+group with one member buys nothing yet. Conceptual route groups —
+`(marketing)`, `api` — remain planned but not created as empty folders;
+they appear when the first route in each actually needs one, per Next.js
+App Router route group conventions.
 
 ## Dependency rule
 
@@ -325,3 +340,22 @@ extends ADR-008/ADR-009's existing pattern (RLS/database backstop plus an
 independent application-level check, neither one trusted alone) to
 non-authorization data integrity, and deliberately stops at two small
 triggers rather than a general-purpose constraint or workflow framework.
+
+**ADR-012: the public event page uses a cookie-less, always-`anon`
+Supabase client, not the visitor's own session.** RFC-005 needed a way for
+an anonymous visitor to read published event data without weakening
+`authenticated`'s existing RLS policies or reaching for the service-role
+key. The alternative to `lib/supabase/public.ts` — reusing
+`lib/supabase/server.ts` (which forwards the visitor's cookies) and adding
+`to authenticated` policies alongside the new `to anon` ones — would have
+made "the public boundary" depend on browser login state: a logged-in
+organizer from an unrelated organization would see the page through a
+different, wider policy than an anonymous visitor sees it through, and
+every future public-data decision would need to consider both roles
+instead of one. Building the public route on a client that never carries
+a session keeps the boundary a single Postgres role (`anon`) to grant
+access to, reason about, and test (see
+[docs/rfcs/RFC-005-public-event-page.md](rfcs/RFC-005-public-event-page.md)
+"RLS / database strategy") — it also means the page renders identically
+for every visitor, which is the actual product requirement ("No login
+should be required for the public route").

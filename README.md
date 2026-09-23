@@ -6,19 +6,22 @@ first module of a longer-term "operating system for independent events"
 (check-in, guest lists, audience database, billing, and more, added
 incrementally).
 
-**Current implementation stage: RFC-003 — Authentication & Organizations**
+**Current implementation stage: RFC-005 — Public Event Page**
 
 RFC-001 established the technical foundation (Next.js, Supabase client
 plumbing). RFC-002 added the full database schema, tenant isolation, and Row
-Level Security as Supabase migrations. RFC-003 adds authentication
+Level Security as Supabase migrations. RFC-003 added authentication
 (sign-up/sign-in/sign-out), organization creation, multi-organization
-membership, and tenant-scoped dashboard routing — the first application
-code to actually query the RFC-002 schema. See
-[docs/architecture.md](docs/architecture.md) for the application
-architecture, [docs/database.md](docs/database.md) for the database
-design, security model, and decision log, and
-[docs/rfcs/RFC-003-auth-organizations.md](docs/rfcs/RFC-003-auth-organizations.md)
-for the auth/tenancy design.
+membership, and tenant-scoped dashboard routing. RFC-004 added event and
+ticket type management for organizers. RFC-005 adds the first public,
+unauthenticated, buyer-facing page — an anonymous visitor can view a
+PUBLISHED event and its public ticket types at `/e/[organizationSlug]/[eventSlug]`,
+through a dedicated public read boundary rather than by relaxing the
+organizer-facing RLS policies. See [docs/architecture.md](docs/architecture.md)
+for the application architecture, [docs/database.md](docs/database.md) for
+the database design, security model, and decision log, and
+[docs/rfcs/RFC-005-public-event-page.md](docs/rfcs/RFC-005-public-event-page.md)
+for the public page design.
 
 ## Stack
 
@@ -60,7 +63,7 @@ With Docker running:
 
 ```bash
 npx supabase start      # local Postgres + Auth + Studio, applies migrations
-npx supabase test db    # runs the pgTAP suite (33 assertions: RFC-002 + RFC-003)
+npx supabase test db    # runs the pgTAP suite (74 assertions: RFC-002 + RFC-003 + RFC-004 + RFC-005)
 npx supabase gen types typescript --local > src/types/database.ts
 ```
 
@@ -203,3 +206,43 @@ check-in, guest lists, billing, settlements, promoters, merchandising,
 audience CRM, email campaigns, advanced analytics, discount codes, ticket
 transfer/resale, seat maps, or native applications. Those arrive in
 RFC-005 and later.
+
+## What RFC-005 includes
+
+- The first public, unauthenticated, buyer-facing page:
+  `/e/[organizationSlug]/[eventSlug]` (a Server Component, no
+  `/dashboard/...` route, no event UUIDs in the URL)
+- A dedicated public read boundary (`src/features/events/public/`) that
+  maps database rows to a narrow `PublicEventPage` DTO — never the
+  organizer's internal `Tables<"events">` shape — showing only
+  organization name/slug/timezone, event name/description/venue/address/
+  dates, and PUBLIC, active, in-stock ticket types with buyer-facing
+  availability (UPCOMING / AVAILABLE / ENDED) derived from
+  `sales_start_at`/`sales_end_at`, never a live inventory count
+- A cookie-less, always-`anon` Supabase client (`src/lib/supabase/public.ts`)
+  so the public route's database access never depends on the visitor's own
+  login state (see ADR-012 in
+  [docs/architecture.md](docs/architecture.md))
+- Three new `to anon` RLS SELECT policies (events, ticket_types,
+  organizations) plus a column-level privilege restriction on
+  `organizations`, scoped to PUBLISHED events only — the existing
+  organizer-facing (`to authenticated`) policies are untouched
+- A uniform not-found response (`notFound()`) for every case a buyer
+  should not be able to distinguish: nonexistent event, DRAFT/FINISHED/
+  CANCELLED/ARCHIVED event, wrong organization/event slug combination
+- Timezone-correct date/time rendering using the organization's own IANA
+  timezone (`Intl.DateTimeFormat`), not the browser's or server's
+- 18 new pgTAP assertions covering the new migration (74 total with
+  RFC-002/RFC-003/RFC-004)
+- [docs/rfcs/RFC-005-public-event-page.md](docs/rfcs/RFC-005-public-event-page.md)
+
+## What RFC-005 intentionally does NOT include
+
+No checkout, shopping cart, order creation, order items, ticket holds,
+inventory reservations, Mercado Pago, payment intents/preferences, payment
+webhooks, buyer accounts, ticket issuance, QR codes, email delivery,
+check-in, guest lists, discount codes, ticket transfer/resale, refunds,
+billing, settlements, promoters, merchandising, audience CRM, analytics,
+custom domains, an image upload system, or seat maps. The "Select" button
+next to each ticket type is intentionally non-functional — it is not
+checkout. Those arrive in RFC-006 and later.
