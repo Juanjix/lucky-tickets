@@ -162,7 +162,12 @@ reads or writes these tables yet.
   RFC-002's RLS as the final boundary
 - A deterministic redirect map (unauthenticated → login, authenticated
   without an organization → onboarding, etc.) with no redirect loops
-- 11 new pgTAP assertions covering the new migration (33 total with RFC-002)
+- 14 new pgTAP assertions covering the new migration (36 total with
+  RFC-002) — updated from the original 11/33 after a real
+  `npx supabase test db` run caught a privilege-grant issue the local
+  sandbox substitute had missed; see
+  [docs/rfcs/RFC-003-auth-organizations.md](docs/rfcs/RFC-003-auth-organizations.md)
+  "Validation" for the full incident
 - [docs/rfcs/RFC-003-auth-organizations.md](docs/rfcs/RFC-003-auth-organizations.md)
 
 ## What RFC-003 intentionally does NOT include
@@ -171,3 +176,30 @@ No event management, ticket types, checkout, Mercado Pago, orders, tickets,
 QR generation, door/check-in, guest lists, billing, email delivery, merch,
 promoters, analytics, OAuth providers, invitations, or team-member-management
 UI. Those arrive in RFC-004 and later.
+
+## What RFC-004 includes
+
+- Event creation (name + start date), editing (venue, description, end
+  date, capacity), and DRAFT → PUBLISHED publication, all under
+  `/dashboard/[organizationSlug]/events`
+- Ticket type management (create/edit/remove) per event, with money in
+  integer minor units (`src/lib/money.ts`) and organization-scoped
+  currency
+- Two new database triggers enforcing cross-table invariants a `CHECK`
+  constraint can't express: ticket inventory vs. event capacity, and
+  publication requirements (venue + at least one sellable ticket type) —
+  no new table or column
+- Reuses RFC-002's existing `events`/`ticket_types` schema and RLS
+  policies, and RFC-003's `requireOrganizationRole`, unchanged
+- 20 new pgTAP assertions covering the new migration (56 total with
+  RFC-002/RFC-003)
+- [docs/rfcs/RFC-004-events-ticket-types.md](docs/rfcs/RFC-004-events-ticket-types.md)
+
+## What RFC-004 intentionally does NOT include
+
+No public event page, public event discovery, checkout, Mercado Pago,
+payment webhooks, orders, order items, ticket issuance, QR codes,
+check-in, guest lists, billing, settlements, promoters, merchandising,
+audience CRM, email campaigns, advanced analytics, discount codes, ticket
+transfer/resale, seat maps, or native applications. Those arrive in
+RFC-005 and later.

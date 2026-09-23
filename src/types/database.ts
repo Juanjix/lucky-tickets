@@ -1058,6 +1058,10 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      check_event_ticket_capacity: {
+        Args: { p_event_id: string }
+        Returns: undefined
+      }
       create_organization: {
         Args: { p_name: string; p_slug: string; p_timezone?: string }
         Returns: {

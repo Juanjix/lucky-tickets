@@ -103,8 +103,12 @@ src/
 ├── features/     Business capabilities grouped by domain. `auth/` and
 │                 `organizations/` exist as of RFC-003 (schemas, Server
 │                 Actions, components, and — for organizations — a
-│                 `server/` subfolder for RLS-backed read helpers). Events,
-│                 ticketing, etc. arrive with the RFCs that need them.
+│                 `server/` subfolder for RLS-backed read helpers). `events/`
+│                 exists as of RFC-004 (schemas, Server Actions, components,
+│                 `queries.ts`, `permissions.ts`, and `publish-rules.ts` —
+│                 the centralized publication invariants RFC-005/RFC-006
+│                 are expected to reuse). Ticketing, checkout, etc. arrive
+│                 with the RFCs that need them.
 ├── lib/          Infrastructure and framework integration.
 │   ├── env/      Zod-validated environment access, split public/server.
 │   ├── supabase/ SSR-safe Supabase client factories + session refresh.
@@ -306,3 +310,18 @@ member."** `requireOrganizationMembership` deliberately can't distinguish
 these two cases to the client, extending RFC-002's tenant-invisibility
 guarantee (docs/database.md "Tenant boundary") to the application/routing
 layer. A 403 would itself confirm a slug belongs to a real organization.
+
+**ADR-011: cross-table integrity invariants (RFC-004) are triggers, not
+application-only checks.** "Ticket inventory must not exceed event
+capacity" and "a published event must have a venue and a sellable ticket
+type" each span two tables, so neither can be a single-table `CHECK`
+constraint — but both are still real data integrity rules, not just UX
+validation, so RFC-004 added two narrowly-scoped `SECURITY INVOKER`
+trigger functions (see
+[docs/rfcs/RFC-004-events-ticket-types.md](rfcs/RFC-004-events-ticket-types.md)
+"Event capacity" / "Event publication") rather than relying solely on the
+matching TypeScript checks in `src/features/events/publish-rules.ts`. This
+extends ADR-008/ADR-009's existing pattern (RLS/database backstop plus an
+independent application-level check, neither one trusted alone) to
+non-authorization data integrity, and deliberately stops at two small
+triggers rather than a general-purpose constraint or workflow framework.

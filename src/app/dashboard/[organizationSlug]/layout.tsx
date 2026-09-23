@@ -1,3 +1,5 @@
+import Link from "next/link";
+
 import { SignOutButton } from "@/features/auth/components/sign-out-button";
 import { OrganizationSwitcher } from "@/features/organizations/components/organization-switcher";
 import { listMyOrganizations } from "@/features/organizations/server/list-my-organizations";
@@ -11,6 +13,11 @@ import { createClient } from "@/lib/supabase/server";
  * the caller's role for their own authorization should still call
  * `requireOrganizationRole` themselves - this layout only establishes
  * membership, the minimum every dashboard route needs.
+ *
+ * RFC-004 adds the minimum navigation it needs (Dashboard, Events) to this
+ * same header - deliberately not a redesign; a real navigation component
+ * (active-state styling, more sections, mobile menu) is left to whichever
+ * RFC first needs more than two links.
  */
 export default async function OrganizationDashboardLayout(
   props: LayoutProps<"/dashboard/[organizationSlug]">,
@@ -25,7 +32,7 @@ export default async function OrganizationDashboardLayout(
   return (
     <div className="flex min-h-full flex-1 flex-col">
       <header className="flex flex-wrap items-center justify-between gap-3 border-b border-zinc-200 px-6 py-4 dark:border-zinc-800">
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-4">
           <span className="text-lg font-semibold tracking-tight text-zinc-950 dark:text-zinc-50">
             {organization.name}
           </span>
@@ -33,6 +40,20 @@ export default async function OrganizationDashboardLayout(
             organizations={organizations}
             activeSlug={organizationSlug}
           />
+          <nav className="flex items-center gap-4 text-sm font-medium text-zinc-600 dark:text-zinc-400">
+            <Link
+              href={`/dashboard/${organizationSlug}`}
+              className="hover:text-zinc-950 dark:hover:text-zinc-50"
+            >
+              Dashboard
+            </Link>
+            <Link
+              href={`/dashboard/${organizationSlug}/events`}
+              className="hover:text-zinc-950 dark:hover:text-zinc-50"
+            >
+              Events
+            </Link>
+          </nav>
         </div>
         <SignOutButton />
       </header>
