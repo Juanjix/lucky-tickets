@@ -7,7 +7,7 @@ import {
   formatEventTime,
 } from "@/features/events/public/format";
 import { getPublicEvent } from "@/features/events/public/queries";
-import { TicketTypeList } from "@/features/events/public/components/ticket-type-list";
+import { CheckoutForm } from "@/features/checkout/components/checkout-form";
 
 /**
  * The public, buyer-facing event page (RFC-005). No authentication is
@@ -86,7 +86,9 @@ export default async function PublicEventPage(
 
         <section className="flex flex-col gap-4">
           <h2 className="text-lg font-semibold tracking-tight">Entradas</h2>
-          <TicketTypeList
+          <CheckoutForm
+            organizationSlug={organization.slug}
+            eventSlug={event.slug}
             ticketTypes={ticketTypes}
             timezone={organization.timezone}
           />

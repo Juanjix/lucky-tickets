@@ -12,7 +12,15 @@
  * into one of these.
  */
 
-export type TicketAvailability = "UPCOMING" | "AVAILABLE" | "ENDED";
+/**
+ * `SOLD_OUT` was added by RFC-006 (section 37) alongside the other three,
+ * which RFC-005 already established. It is derived ONLY from
+ * `get_public_ticket_availability`'s authoritative `is_sold_out` signal
+ * (RFC-006 section 38) - never inferred from UI state, and never computed
+ * by counting anything the public page can see on its own (`anon` has no
+ * visibility into orders/order_items/ticket_holds).
+ */
+export type TicketAvailability = "UPCOMING" | "AVAILABLE" | "SOLD_OUT" | "ENDED";
 
 export type PublicOrganization = {
   name: string;
@@ -38,6 +46,14 @@ export type PublicTicketType = {
   salesEndAt: string | null;
   /** Derived, not persisted - see src/features/events/public/availability.ts. */
   availability: TicketAvailability;
+  /**
+   * The most tickets a single checkout may request of this ticket type
+   * (RFC-004's `ticket_types.max_per_order`, RFC-006 section 16). Shown to
+   * the buyer as a selection ceiling for UX only - `create_order_with_hold`
+   * independently re-enforces it server-side regardless of what the
+   * browser sends (RFC-006 section 3.1).
+   */
+  maxPerOrder: number;
 };
 
 export type PublicEvent = {

@@ -445,6 +445,7 @@ export type Database = {
           buyer_email: string
           buyer_name: string
           buyer_phone: string | null
+          checkout_token_hash: string | null
           created_at: string
           currency: string
           customer_id: string | null
@@ -454,6 +455,8 @@ export type Database = {
           order_number: string
           organization_id: string
           paid_at: string | null
+          provider_checkout_url: string | null
+          provider_preference_id: string | null
           service_fee_amount: number
           status: Database["public"]["Enums"]["order_status"]
           subtotal_amount: number
@@ -464,6 +467,7 @@ export type Database = {
           buyer_email: string
           buyer_name: string
           buyer_phone?: string | null
+          checkout_token_hash?: string | null
           created_at?: string
           currency: string
           customer_id?: string | null
@@ -473,6 +477,8 @@ export type Database = {
           order_number: string
           organization_id: string
           paid_at?: string | null
+          provider_checkout_url?: string | null
+          provider_preference_id?: string | null
           service_fee_amount?: number
           status?: Database["public"]["Enums"]["order_status"]
           subtotal_amount: number
@@ -483,6 +489,7 @@ export type Database = {
           buyer_email?: string
           buyer_name?: string
           buyer_phone?: string | null
+          checkout_token_hash?: string | null
           created_at?: string
           currency?: string
           customer_id?: string | null
@@ -492,6 +499,8 @@ export type Database = {
           order_number?: string
           organization_id?: string
           paid_at?: string | null
+          provider_checkout_url?: string | null
+          provider_preference_id?: string | null
           service_fee_amount?: number
           status?: Database["public"]["Enums"]["order_status"]
           subtotal_amount?: number
@@ -1062,6 +1071,26 @@ export type Database = {
         Args: { p_event_id: string }
         Returns: undefined
       }
+      create_order_with_hold: {
+        Args: {
+          p_buyer_email: string
+          p_buyer_name: string
+          p_buyer_phone: string | null
+          p_checkout_token_hash: string
+          p_event_slug: string
+          p_items: Json
+          p_organization_slug: string
+        }
+        Returns: {
+          currency: string
+          expires_at: string
+          items: Json
+          order_id: string
+          order_status: string
+          subtotal_amount: number
+          total_amount: number
+        }[]
+      }
       create_organization: {
         Args: { p_name: string; p_slug: string; p_timezone?: string }
         Returns: {
@@ -1081,6 +1110,92 @@ export type Database = {
           isOneToOne: true
           isSetofReturn: false
         }
+      }
+      expire_pending_orders: {
+        Args: Record<PropertyKey, never>
+        Returns: number
+      }
+      confirm_order_payment: {
+        Args: {
+          p_approved_at: string | null
+          p_currency: string
+          p_order_id: string
+          p_paid_amount_minor: number
+          p_payment_method: string | null
+          p_provider: Database["public"]["Enums"]["payment_provider"]
+          p_provider_payload: Json
+          p_provider_payment_id: string
+          p_status: Database["public"]["Enums"]["payment_status"]
+          p_webhook_event_id: string | null
+        }
+        Returns: {
+          order_id: string
+          order_status: string
+          outcome: string
+          payment_id: string
+        }[]
+      }
+      mark_webhook_event: {
+        Args: {
+          p_error_message: string | null
+          p_status: Database["public"]["Enums"]["webhook_status"]
+          p_webhook_event_id: string
+        }
+        Returns: undefined
+      }
+      record_payment_preference: {
+        Args: {
+          p_checkout_token_hash: string
+          p_order_id: string
+          p_provider: Database["public"]["Enums"]["payment_provider"]
+          p_provider_checkout_url: string
+          p_provider_preference_id: string
+        }
+        Returns: {
+          order_id: string
+          provider_checkout_url: string
+          provider_preference_id: string
+        }[]
+      }
+      record_webhook_event: {
+        Args: {
+          p_event_type: string
+          p_payload: Json
+          p_provider: Database["public"]["Enums"]["payment_provider"]
+          p_provider_event_id: string
+        }
+        Returns: {
+          already_existed: boolean
+          status: Database["public"]["Enums"]["webhook_status"]
+          webhook_event_id: string
+        }[]
+      }
+      get_checkout_order: {
+        Args: { p_checkout_token_hash: string; p_order_id: string }
+        Returns: {
+          currency: string
+          event_name: string
+          event_starts_at: string
+          event_venue_name: string | null
+          expires_at: string
+          items: Json
+          order_id: string
+          order_status: string
+          organization_id: string
+          organization_name: string
+          organization_timezone: string
+          provider_checkout_url: string | null
+          provider_preference_id: string | null
+          subtotal_amount: number
+          total_amount: number
+        }[]
+      }
+      get_public_ticket_availability: {
+        Args: { p_event_id: string }
+        Returns: {
+          is_sold_out: boolean
+          ticket_type_id: string
+        }[]
       }
       has_organization_role: {
         Args: {

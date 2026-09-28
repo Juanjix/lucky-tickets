@@ -359,3 +359,66 @@ access to, reason about, and test (see
 "RLS / database strategy") — it also means the page renders identically
 for every visitor, which is the actual product requirement ("No login
 should be required for the public route").
+
+**ADR-013: anonymous checkout writes go through `SECURITY DEFINER`
+functions, not new RLS policies.** RFC-006 needed anonymous visitors to be
+able to create `orders`/`order_items`/`ticket_holds`/`customers` rows
+without weakening RFC-002's existing `authenticated`-only policies on
+those tables. RLS policies are evaluated per-row, not per-transaction, so
+they cannot express "lock this ticket_types row, recompute availability
+under that lock, and only then allow this INSERT as part of one atomic
+unit" — two separate PostgREST requests hitting separate INSERT policies
+could always race and reintroduce the overselling bug the RFC exists to
+prevent. `create_order_with_hold`, `get_checkout_order`, and
+`get_public_ticket_availability` (all `SECURITY DEFINER`, all with
+explicitly revoked-then-re-granted `EXECUTE` privileges, per RFC-003's
+established privilege-grant pattern) are instead the entire anonymous
+write/read surface for commerce data — see
+[docs/rfcs/RFC-006-orders-inventory.md](rfcs/RFC-006-orders-inventory.md)
+"Public API boundary" for the full reasoning and the concurrency proof
+this design enables.
+
+**ADR-014: an order can only reach `PAID` through a `service_role`-only,
+provider-verified, atomic function — never through the browser redirect or
+the webhook body.** RFC-007 needed to turn a `PENDING_PAYMENT` order into
+`PAID` in response to a Mercado Pago payment, without ever trusting the
+buyer's own browser (the redirect back from Checkout Pro is presentation
+only, and its query parameters are attacker-controllable) or the webhook
+request body (an unauthenticated `POST` could otherwise claim any
+`data.id`/status it likes). The alternative — validating the webhook
+signature and updating `orders.status` directly from a Route Handler using
+the ordinary `anon`/`authenticated` client — would have meant either
+opening an RLS `UPDATE` policy that any authenticated request could
+theoretically reach, or duplicating RFC-006's `create_order_with_hold`
+precedent of keeping the entire write surface behind `SECURITY DEFINER`
+functions with an explicit privilege grant. RFC-007 follows that existing
+precedent instead: `confirm_order_payment` is granted to `service_role`
+only (unreachable by `anon`/`authenticated`, even an organization's own
+`OWNER` — see
+[docs/rfcs/RFC-007-mercado-pago-payments.md](rfcs/RFC-007-mercado-pago-payments.md)
+"RLS / security"), is the only code path that can ever write
+`orders.status = 'PAID'` (there is still no client-facing `UPDATE` policy
+on `orders` at all, extending ADR-013's "no direct writes" boundary to
+payment state), and only runs after the webhook's `x-signature` has been
+verified and the payment has been independently re-fetched from Mercado
+Pago's own `GET /v1/payments/:id` — the webhook body itself is discarded
+after providing the resource id. This makes "the browser cannot mark an
+order paid" a database privilege fact, not an application convention,
+exactly as ADR-013 made "the browser cannot oversell inventory" a database
+fact rather than a UI rule.
+
+**ADR-015: payment/webhook credentials live in a separate, lazily-loaded
+env schema, not `getServerEnv()`.** `src/lib/env/server.ts`'s existing
+`getServerEnv()`/`isServerEnvConfigured()` are called by `src/proxy.ts` on
+every request to decide whether to attempt a Supabase session refresh —
+folding `MERCADO_PAGO_ACCESS_TOKEN`/`MERCADO_PAGO_WEBHOOK_SECRET` into that
+same schema would have made any environment missing a Mercado Pago
+credential fail on every single request, including ones that never touch
+payments at all (the public event page, the organizer dashboard, `npm run
+build` itself). RFC-007 instead added a second schema,
+`paymentServerEnvSchema`/`getPaymentServerEnv()`, called only from the
+specific preference-creation and webhook code paths that actually need a
+Mercado Pago credential — extending ADR-005's provider-abstraction
+principle to environment validation itself: a provider's configuration
+should fail only the requests that use that provider, not every request in
+the application.

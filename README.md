@@ -6,22 +6,25 @@ first module of a longer-term "operating system for independent events"
 (check-in, guest lists, audience database, billing, and more, added
 incrementally).
 
-**Current implementation stage: RFC-005 — Public Event Page**
+**Current implementation stage: RFC-006 — Orders & Inventory**
 
 RFC-001 established the technical foundation (Next.js, Supabase client
 plumbing). RFC-002 added the full database schema, tenant isolation, and Row
 Level Security as Supabase migrations. RFC-003 added authentication
 (sign-up/sign-in/sign-out), organization creation, multi-organization
 membership, and tenant-scoped dashboard routing. RFC-004 added event and
-ticket type management for organizers. RFC-005 adds the first public,
-unauthenticated, buyer-facing page — an anonymous visitor can view a
-PUBLISHED event and its public ticket types at `/e/[organizationSlug]/[eventSlug]`,
-through a dedicated public read boundary rather than by relaxing the
-organizer-facing RLS policies. See [docs/architecture.md](docs/architecture.md)
-for the application architecture, [docs/database.md](docs/database.md) for
-the database design, security model, and decision log, and
-[docs/rfcs/RFC-005-public-event-page.md](docs/rfcs/RFC-005-public-event-page.md)
-for the public page design.
+ticket type management for organizers. RFC-005 added the first public,
+unauthenticated, buyer-facing page. RFC-006 turns that page into the start
+of a real purchase flow — an anonymous buyer can select tickets, enter
+their name and email, and create a `PENDING_PAYMENT` order with a
+concurrency-safe inventory reservation, then return to a checkout
+confirmation page via a secure, single-use access token. There is still no
+payment integration — that's RFC-007. See
+[docs/architecture.md](docs/architecture.md) for the application
+architecture, [docs/database.md](docs/database.md) for the database
+design, security model, and decision log, and
+[docs/rfcs/RFC-006-orders-inventory.md](docs/rfcs/RFC-006-orders-inventory.md)
+for the checkout design.
 
 ## Stack
 
@@ -63,7 +66,7 @@ With Docker running:
 
 ```bash
 npx supabase start      # local Postgres + Auth + Studio, applies migrations
-npx supabase test db    # runs the pgTAP suite (74 assertions: RFC-002 + RFC-003 + RFC-004 + RFC-005)
+npx supabase test db    # runs the pgTAP suite (135 assertions: RFC-002 + RFC-003 + RFC-004 + RFC-005 + RFC-006)
 npx supabase gen types typescript --local > src/types/database.ts
 ```
 
@@ -246,3 +249,52 @@ billing, settlements, promoters, merchandising, audience CRM, analytics,
 custom domains, an image upload system, or seat maps. The "Select" button
 next to each ticket type is intentionally non-functional — it is not
 checkout. Those arrive in RFC-006 and later.
+
+## What RFC-006 includes
+
+- Anonymous checkout: `/e/[organizationSlug]/[eventSlug]` now has working
+  ticket quantity selection and a buyer name/email form
+  (`src/features/checkout/components/checkout-form.tsx`), replacing
+  RFC-005's disabled `[ Select ]` placeholder
+- `POST /api/checkout` — parses/validates the buyer's cart with Zod,
+  generates a secure checkout token, and calls a new atomic Postgres
+  function; returns a narrow DTO with server-authoritative totals only
+- `create_order_with_hold(...)` — a `SECURITY DEFINER` Postgres function
+  that atomically resolves the organization/event, locks and re-validates
+  every requested ticket type (in deterministic ascending-id order, to
+  prevent deadlocks between overlapping multi-ticket carts), recomputes
+  inventory availability under that lock, and creates the
+  order/order_items/ticket_holds as one all-or-nothing transaction — the
+  concurrency-safety mechanism preventing overselling, proven with a real
+  two-connection concurrency script
+  (`scripts/rfc-006-concurrency-test.sh`), not just asserted
+- `get_checkout_order(...)` and a secure checkout access token
+  (`src/lib/checkout/token.ts`: `crypto.randomBytes` + SHA-256, only the
+  hash ever stored) — an order's UUID alone is never sufficient to read it
+  back
+- `get_public_ticket_availability(...)` — an authoritative `SOLD_OUT`
+  signal for the public page, added without giving `anon` any direct
+  visibility into orders/order_items/ticket_holds
+- A checkout confirmation page, `/checkout/[orderId]?token=...`, showing
+  authoritative totals, order status, and a live reservation countdown —
+  with a deliberately disabled "Continuar al pago" button (RFC-007's job)
+- One new column: `orders.checkout_token_hash` — every other table reused
+  as-is from RFC-002
+- An idempotent `expire_pending_orders()` lifecycle function
+  (`PENDING_PAYMENT` → `EXPIRED`); inventory correctness never depends on
+  it having run
+- 61 new pgTAP assertions covering the new migration (135 total with
+  RFC-002/RFC-003/RFC-004/RFC-005)
+- [docs/rfcs/RFC-006-orders-inventory.md](docs/rfcs/RFC-006-orders-inventory.md)
+
+## What RFC-006 intentionally does NOT include
+
+No Mercado Pago integration, Checkout Pro, Mercado Pago OAuth, payment
+creation, payment preferences, payment webhooks, payment reconciliation,
+the `PENDING_PAYMENT` → `PAID` transition, ticket issuance, QR codes,
+ticket emails, check-in, refunds, chargebacks, billing settlements,
+platform fee collection, promo codes, discount campaigns, promoters,
+resale, ticket transfer, seat maps, merchandising, scheduled external cron
+infrastructure, service-role checkout, or native apps. The "Continuar al
+pago" button on the checkout page is intentionally disabled. Those arrive
+in RFC-007 and later.

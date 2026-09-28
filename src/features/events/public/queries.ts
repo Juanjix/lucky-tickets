@@ -96,7 +96,7 @@ export const getPublicEvent = cache(async function getPublicEvent(
   const { data: ticketTypeRows, error: ticketTypesError } = await supabase
     .from("ticket_types")
     .select(
-      "id, name, description, unit_price_amount, currency, sales_start_at, sales_end_at",
+      "id, name, description, unit_price_amount, currency, sales_start_at, sales_end_at, max_per_order",
     )
     .eq("organization_id", organizationRow.id)
     .eq("event_id", eventRow.id)
@@ -107,6 +107,23 @@ export const getPublicEvent = cache(async function getPublicEvent(
       cause: ticketTypesError,
     });
   }
+
+  // RFC-006 section 37/38: the public page has zero direct visibility into
+  // orders/order_items/ticket_holds (and must not gain any) - this RPC is
+  // the one authoritative, narrow source for "is this ticket type sold
+  // out", returning only a boolean per ticket type id.
+  const { data: availabilityRows, error: availabilityError } = await supabase
+    .rpc("get_public_ticket_availability", { p_event_id: eventRow.id });
+
+  if (availabilityError) {
+    throw new AppError("internal", "Failed to load ticket availability.", {
+      cause: availabilityError,
+    });
+  }
+
+  const soldOutByTicketTypeId = new Map(
+    (availabilityRows ?? []).map((row) => [row.ticket_type_id, row.is_sold_out]),
+  );
 
   return {
     organization: {
@@ -132,10 +149,14 @@ export const getPublicEvent = cache(async function getPublicEvent(
       currency: ticketType.currency,
       salesStartAt: ticketType.sales_start_at,
       salesEndAt: ticketType.sales_end_at,
-      availability: deriveTicketAvailability({
-        salesStartAt: ticketType.sales_start_at,
-        salesEndAt: ticketType.sales_end_at,
-      }),
+      maxPerOrder: ticketType.max_per_order,
+      availability: deriveTicketAvailability(
+        {
+          salesStartAt: ticketType.sales_start_at,
+          salesEndAt: ticketType.sales_end_at,
+        },
+        soldOutByTicketTypeId.get(ticketType.id) ?? false,
+      ),
     })),
   };
 });
