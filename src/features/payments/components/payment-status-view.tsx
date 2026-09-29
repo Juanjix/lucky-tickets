@@ -51,12 +51,18 @@ export function PaymentStatusView({
   orderId,
   checkoutToken,
   initialStatus,
+  initialTicketsUrl,
 }: {
   orderId: string;
   checkoutToken: string;
   initialStatus: PublicPaymentStatus;
+  /** RFC-008: set when the server already observed PAID on first render (e.g. the buyer reloaded this page after payment had already been confirmed). */
+  initialTicketsUrl?: string;
 }) {
   const [status, setStatus] = useState<PublicPaymentStatus>(initialStatus);
+  const [ticketsUrl, setTicketsUrl] = useState<string | undefined>(
+    initialTicketsUrl,
+  );
   const [pollingStopped, setPollingStopped] = useState(false);
   const attemptsRef = useRef(0);
 
@@ -76,8 +82,10 @@ export function PaymentStatusView({
         if (response.ok) {
           const body = (await response.json()) as {
             status: PublicPaymentStatus;
+            ticketsUrl?: string;
           };
           setStatus(body.status);
+          setTicketsUrl(body.ticketsUrl);
 
           if (TERMINAL_STATUSES.includes(body.status)) {
             clearInterval(intervalId);
@@ -108,6 +116,14 @@ export function PaymentStatusView({
         {copy.title}
       </h1>
       <p className="text-sm text-zinc-400">{copy.body}</p>
+      {status === "PAID" && ticketsUrl ? (
+        <a
+          href={ticketsUrl}
+          className="inline-flex items-center justify-center rounded-md bg-zinc-50 px-4 py-2 text-sm font-semibold text-zinc-950 transition-colors hover:bg-zinc-200"
+        >
+          Ver mis entradas
+        </a>
+      ) : null}
       {!isTerminal && pollingStopped ? (
         <p className="text-sm text-zinc-500">
           Todavía estamos esperando la confirmación. Podés actualizar esta

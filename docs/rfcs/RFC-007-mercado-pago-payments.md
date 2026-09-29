@@ -1035,6 +1035,33 @@ staging environment with its own Mercado Pago sandbox credentials.
 Either requires the person doing that QA to explicitly choose and set up
 the option — not something this RFC does on its own.
 
+**Update from real local testing (post-implementation):** the same
+local-domain restriction also affects preference creation itself, not
+just the webhook. Mercado Pago's own documentation warns against local
+domains in `back_urls`
+("mercadopago.com/developers/en/docs/checkout-pro/checkout-customization/user-interface/redirection" —
+"Do not use local domains in the back_urls value, such as 'localhost/' or
+'127.0.0.1'"), and in practice the preference-creation API actively
+**rejects** the request when `auto_return` is set and `back_urls.success`
+is a local address, with a misleading error
+(`invalid_auto_return` / "auto_return invalid. back_url.success must be
+defined" — `back_urls.success` genuinely is defined, Mercado Pago just
+won't auto-redirect to a local address). Since `auto_return` only saves
+the buyer one click (Mercado Pago's own "return to site" button on the
+receipt page still gets them back to `back_urls.success` regardless),
+`MercadoPagoPaymentGateway.createCheckout` now omits `auto_return`
+whenever `back_urls.success`'s hostname is `localhost` / `127.0.0.1` /
+`::1` / `0.0.0.0` (see `isLocalUrl` in
+`src/services/payment-gateway/mercado-pago-payment-gateway.ts`), so
+preference creation and the redirect to Mercado Pago's checkout page work
+during local `next dev` testing without a tunnel. This does not change
+any security property — `back_urls` still derive exclusively from
+`NEXT_PUBLIC_APP_URL` (trusted server config), never request headers or
+browser input. It does **not** remove the tunnel requirement above: the
+webhook (`notification_url`) still cannot reach `localhost`, so an order
+will not reach `PAID` after a local sandbox payment without a tunnel —
+only the "get to Mercado Pago's checkout page" step is unblocked.
+
 ## Manual E2E
 
 Not executed, for the same reason as "Mercado Pago sandbox QA" above (no

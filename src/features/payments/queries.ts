@@ -2,6 +2,8 @@ import "server-only";
 
 import { createPublicClient } from "@/lib/supabase/public";
 import { hashCheckoutToken } from "@/lib/checkout/token";
+import { getPaymentServerEnv } from "@/lib/env/server";
+import { getTicketAccessToken } from "@/lib/tickets/access-token";
 
 import { PaymentError, toPaymentError } from "./errors";
 import type { PaymentStatusResponse, PublicPaymentStatus } from "./types";
@@ -76,8 +78,27 @@ export async function getPaymentStatus(
     throw new PaymentError("INVALID_CHECKOUT_TOKEN");
   }
 
+  const status = foldOrderStatus(row.order_status);
+
+  // RFC-008: once the purchase has actually succeeded (PAID, and the
+  // REFUNDED/PARTIALLY_REFUNDED cases foldOrderStatus also maps to PAID -
+  // the purchase itself DID succeed, tickets already exist from when it
+  // was PAID), hand the buyer their tickets-page link. Computed here
+  // (not minted via a new endpoint) so this reuses the EXISTING polling
+  // response `src/features/payments/components/payment-status-view.tsx`
+  // already fetches every 2 seconds - no duplicate polling, no new route.
+  // The token itself is a stateless HMAC of the order id
+  // (src/lib/tickets/access-token.ts) - it never touches Mercado Pago's
+  // servers the way the checkout token does (see that module's doc
+  // comment for why that distinction matters).
+  const ticketsUrl =
+    status === "PAID"
+      ? `${getPaymentServerEnv().NEXT_PUBLIC_APP_URL}/tickets/order/${row.order_id}?token=${getTicketAccessToken(row.order_id)}`
+      : undefined;
+
   return {
     orderId: row.order_id,
-    status: foldOrderStatus(row.order_status),
+    status,
+    ticketsUrl,
   };
 }

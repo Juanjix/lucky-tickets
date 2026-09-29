@@ -126,3 +126,66 @@ export function getPaymentServerEnv() {
 
   return parsed.data;
 }
+
+/**
+ * RFC-008's ticket-specific server-only secrets, kept in their OWN
+ * separate schema/function - same reasoning as `getPaymentServerEnv`
+ * above: only code that actually issues or reads tickets
+ * (`src/lib/tickets/*`, `src/features/tickets/*`, the redefined
+ * `confirm_order_payment` call site in `src/features/payments/webhook.ts`,
+ * and `src/features/payments/queries.ts` for minting the buyer's
+ * tickets-page link) calls this, so a missing ticket secret never breaks
+ * unrelated payment/webhook code paths.
+ *
+ * `TICKET_ACCESS_SIGNING_KEY`: HMAC key used to compute the buyer's
+ * stateless ticket-access capability (`src/lib/tickets/access-token.ts`).
+ * Deliberately a SEPARATE secret from `QR_ENCRYPTION_KEY` below - one
+ * gates "can this browser view this order's tickets page at all", the
+ * other gates "can this raw QR secret be decrypted" - a compromise of one
+ * must never automatically compromise the other.
+ *
+ * `QR_ENCRYPTION_KEY`: passed as a plain argument into
+ * `issue_tickets_for_order`/`get_order_tickets` (RFC-008 migration) so
+ * Postgres can `pgp_sym_encrypt`/`pgp_sym_decrypt` each ticket's raw QR
+ * secret. NEVER stored in the database, never logged - see that
+ * migration's header comment for the full threat-model writeup.
+ *
+ * Both must be long, random, and rotated via the hosting platform's
+ * secret manager if ever exposed - there is no in-app rotation flow in
+ * RFC-008 (documented as a known limitation, not implemented for MVP
+ * scope).
+ */
+const ticketServerEnvSchema = z.object({
+  TICKET_ACCESS_SIGNING_KEY: z
+    .string()
+    .min(32, "TICKET_ACCESS_SIGNING_KEY must be at least 32 characters"),
+  QR_ENCRYPTION_KEY: z
+    .string()
+    .min(32, "QR_ENCRYPTION_KEY must be at least 32 characters"),
+});
+
+function readRawTicketServerEnv() {
+  return {
+    TICKET_ACCESS_SIGNING_KEY: process.env.TICKET_ACCESS_SIGNING_KEY,
+    QR_ENCRYPTION_KEY: process.env.QR_ENCRYPTION_KEY,
+  };
+}
+
+/** Validates and returns RFC-008's ticket env vars, throwing a clear error if any are missing or invalid. */
+export function getTicketServerEnv() {
+  const parsed = ticketServerEnvSchema.safeParse(readRawTicketServerEnv());
+
+  if (!parsed.success) {
+    const issues = parsed.error.issues
+      .map(
+        (issue) => `  - ${issue.path.join(".") || "(root)"}: ${issue.message}`,
+      )
+      .join("\n");
+
+    throw new Error(
+      `Invalid ticket environment variables. Check your .env.local against .env.example:\n${issues}`,
+    );
+  }
+
+  return parsed.data;
+}

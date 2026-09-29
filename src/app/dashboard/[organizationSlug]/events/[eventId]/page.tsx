@@ -9,6 +9,7 @@ import {
   getEventTicketTypes,
   getOrganizationEvent,
 } from "@/features/events/queries";
+import { listEventTickets } from "@/features/tickets/queries";
 import { requireOrganizationMembership } from "@/lib/auth/require-organization";
 import { createClient } from "@/lib/supabase/server";
 
@@ -41,6 +42,16 @@ export default async function EventDetailPage(
     organization.id,
     eventId,
   );
+
+  // RFC-008: a basic operational list - never the raw QR token, the QR
+  // ciphertext, or any buyer-access/checkout secret. See
+  // src/features/tickets/queries.ts's listEventTickets doc comment.
+  const issuedTickets = await listEventTickets(
+    supabase,
+    organization.id,
+    eventId,
+  );
+  const ticketTypeNameById = new Map(ticketTypes.map((tt) => [tt.id, tt.name]));
 
   const canManage = (EVENT_MANAGER_ROLES as readonly string[]).includes(
     membership.role,
@@ -115,6 +126,58 @@ export default async function EventDetailPage(
           ticketTypes={ticketTypes}
           canManage={canManage}
         />
+      </section>
+
+      <section className="flex flex-col gap-4">
+        <h2 className="text-lg font-semibold tracking-tight text-zinc-950 dark:text-zinc-50">
+          Issued tickets
+        </h2>
+        {issuedTickets.length === 0 ? (
+          <p className="text-sm text-zinc-600 dark:text-zinc-400">
+            No tickets have been issued for this event yet - tickets are created
+            automatically once an order is paid.
+          </p>
+        ) : (
+          <div className="overflow-x-auto rounded-lg border border-zinc-200 dark:border-zinc-800">
+            <table className="w-full text-left text-sm">
+              <thead className="bg-zinc-50 text-zinc-500 dark:bg-zinc-900 dark:text-zinc-400">
+                <tr>
+                  <th className="px-4 py-2 font-medium">Ticket</th>
+                  <th className="px-4 py-2 font-medium">Type</th>
+                  <th className="px-4 py-2 font-medium">Order</th>
+                  <th className="px-4 py-2 font-medium">Status</th>
+                  <th className="px-4 py-2 font-medium">Created at</th>
+                </tr>
+              </thead>
+              <tbody>
+                {issuedTickets.map((ticket) => (
+                  <tr
+                    key={ticket.id}
+                    className="border-t border-zinc-200 dark:border-zinc-800"
+                  >
+                    <td className="px-4 py-2 text-zinc-900 dark:text-zinc-100">
+                      {ticket.ticketNumber}
+                    </td>
+                    <td className="px-4 py-2 text-zinc-900 dark:text-zinc-100">
+                      {ticketTypeNameById.get(ticket.ticketTypeId) ?? "—"}
+                    </td>
+                    {/* Truncated, debugging-only identifier - never a
+                        buyer-facing or otherwise sensitive value. */}
+                    <td className="px-4 py-2 font-mono text-xs text-zinc-500">
+                      {ticket.orderId.slice(0, 8)}…
+                    </td>
+                    <td className="px-4 py-2 text-zinc-900 dark:text-zinc-100">
+                      {ticket.status}
+                    </td>
+                    <td className="px-4 py-2 text-zinc-500">
+                      {new Date(ticket.createdAt).toLocaleString()}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </section>
     </div>
   );

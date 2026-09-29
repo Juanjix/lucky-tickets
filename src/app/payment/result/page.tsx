@@ -68,6 +68,7 @@ export default async function PaymentResultPage(
           orderId={orderId}
           checkoutToken={token ?? ""}
           initialStatus={initial.status}
+          initialTicketsUrl={initial.ticketsUrl}
         />
         <footer className="border-t border-zinc-800 pt-6 text-center text-xs text-zinc-500">
           Ticketing seguro por {siteConfig.name}

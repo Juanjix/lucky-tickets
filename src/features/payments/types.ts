@@ -28,4 +28,13 @@ export type PublicPaymentStatus = (typeof PAYMENT_STATUS_VALUES)[number];
 export type PaymentStatusResponse = {
   orderId: string;
   status: PublicPaymentStatus;
+  /**
+   * RFC-008: the buyer's "view my tickets" link, present ONLY once
+   * `status` has folded to `PAID` (never for PENDING_PAYMENT/
+   * PAYMENT_FAILED/EXPIRED - there is nothing to view yet). Deliberately
+   * piggy-backs on this SAME existing polling response rather than a new
+   * endpoint (RFC-007's own "reuse existing infrastructure" precedent) -
+   * see src/features/payments/queries.ts's getPaymentStatus.
+   */
+  ticketsUrl?: string;
 };

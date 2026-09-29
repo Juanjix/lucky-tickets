@@ -955,9 +955,12 @@ export type Database = {
           order_id: string
           order_item_id: string
           organization_id: string
+          qr_secret_ciphertext: string
+          qr_secret_version: number
           qr_token_hash: string | null
           status: Database["public"]["Enums"]["ticket_status"]
           ticket_number: string
+          ticket_sequence: number
           ticket_type_id: string
           updated_at: string
         }
@@ -972,9 +975,12 @@ export type Database = {
           order_id: string
           order_item_id: string
           organization_id: string
+          qr_secret_ciphertext: string
+          qr_secret_version?: number
           qr_token_hash?: string | null
           status?: Database["public"]["Enums"]["ticket_status"]
           ticket_number: string
+          ticket_sequence: number
           ticket_type_id: string
           updated_at?: string
         }
@@ -989,9 +995,12 @@ export type Database = {
           order_id?: string
           order_item_id?: string
           organization_id?: string
+          qr_secret_ciphertext?: string
+          qr_secret_version?: number
           qr_token_hash?: string | null
           status?: Database["public"]["Enums"]["ticket_status"]
           ticket_number?: string
+          ticket_sequence?: number
           ticket_type_id?: string
           updated_at?: string
         }
@@ -1125,6 +1134,7 @@ export type Database = {
           p_provider: Database["public"]["Enums"]["payment_provider"]
           p_provider_payload: Json
           p_provider_payment_id: string
+          p_qr_encryption_key: string
           p_status: Database["public"]["Enums"]["payment_status"]
           p_webhook_event_id: string | null
         }
@@ -1133,6 +1143,31 @@ export type Database = {
           order_status: string
           outcome: string
           payment_id: string
+        }[]
+      }
+      issue_tickets_for_order: {
+        Args: { p_order_id: string; p_qr_encryption_key: string }
+        Returns: number
+      }
+      issue_tickets_for_order_safe: {
+        Args: { p_order_id: string; p_qr_encryption_key: string }
+        Returns: undefined
+      }
+      get_order_tickets: {
+        Args: { p_order_id: string; p_qr_encryption_key: string }
+        Returns: {
+          checked_in_at: string | null
+          event_name: string
+          event_starts_at: string
+          event_venue_name: string | null
+          issued_at: string | null
+          order_status: string
+          organization_name: string
+          qr_raw_token: string
+          ticket_id: string
+          ticket_number: string
+          ticket_status: string
+          ticket_type_name: string
         }[]
       }
       mark_webhook_event: {

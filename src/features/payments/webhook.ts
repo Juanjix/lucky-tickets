@@ -6,6 +6,7 @@ import { getPaymentServerEnv } from "@/lib/env/server";
 import { verifyWebhookSignature } from "@/lib/mercado-pago/signature";
 import { mapProviderStatusToPaymentStatus } from "@/lib/mercado-pago/mapper";
 import { MercadoPagoPaymentGateway } from "@/services/payment-gateway/mercado-pago-payment-gateway";
+import { getTicketServerEnv } from "@/lib/env/server";
 
 /**
  * `POST /api/webhooks/mercado-pago` orchestration (RFC-007 sections
@@ -208,6 +209,15 @@ export async function processMercadoPagoWebhook(input: {
     return { httpStatus: 200, reason: "missing_external_reference" };
   }
 
+  // RFC-008: confirm_order_payment now also issues tickets (in the SAME
+  // Postgres transaction as the PAID transition - see that migration's
+  // header comment) the instant this order reaches PAID, so the QR
+  // encryption key has to travel through this one call too. It is never
+  // logged, never persisted by this handler, and confirm_order_payment
+  // itself never stores it anywhere - see getTicketServerEnv's doc
+  // comment.
+  const { QR_ENCRYPTION_KEY } = getTicketServerEnv();
+
   const { data: confirmData, error: confirmError } = await supabase.rpc(
     "confirm_order_payment",
     {
@@ -221,6 +231,7 @@ export async function processMercadoPagoWebhook(input: {
       p_provider_payload: providerPayment.safePayload,
       p_approved_at: providerPayment.approvedAt,
       p_webhook_event_id: webhookEventRow.webhook_event_id,
+      p_qr_encryption_key: QR_ENCRYPTION_KEY,
     },
   );
 

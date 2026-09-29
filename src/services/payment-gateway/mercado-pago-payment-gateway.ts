@@ -22,6 +22,39 @@ import type {
  * the `mercadopago` SDK or knows about Mercado Pago-specific field names
  * (`init_point`, `transaction_amount`, `external_reference`, ...).
  */
+// Mercado Pago's own documentation explicitly warns against local
+// domains in `back_urls` ("Do not use local domains in the back_urls
+// value, such as 'localhost/' or '127.0.0.1'... We recommend using a
+// server with a named domain (DNS)" -
+// mercadopago.com/developers/en/docs/checkout-pro/checkout-customization/user-interface/redirection).
+// In practice the preference-creation API only actively REJECTS this when
+// `auto_return` is also set: it fails with an `invalid_auto_return`
+// error whose message ("auto_return invalid. back_url.success must be
+// defined") is misleading - `back_urls.success` IS defined, it's just a
+// local address Mercado Pago won't auto-redirect to. `auto_return` is a
+// pure UX nicety (it only saves the buyer one click - Mercado Pago's own
+// "return to site" button on the pending/failure/approved receipt page
+// still gets them back to `back_urls.success` either way), so rather than
+// hard-failing every local `next dev` run that hasn't been put behind an
+// HTTPS tunnel, this gateway only requests `auto_return` when the success
+// URL is NOT a local address. This changes no security property: back_urls
+// still derive exclusively from trusted server config (never request
+// headers/browser input - RFC-007 section 48), and confirm_order_payment
+// never trusts this URL for anything either way.
+function isLocalUrl(url: string): boolean {
+  try {
+    const { hostname } = new URL(url);
+    return (
+      hostname === "localhost" ||
+      hostname === "127.0.0.1" ||
+      hostname === "::1" ||
+      hostname === "0.0.0.0"
+    );
+  } catch {
+    return false;
+  }
+}
+
 export class MercadoPagoPaymentGateway implements PaymentGateway {
   async createCheckout(
     input: CreateCheckoutInput,
@@ -61,7 +94,11 @@ export class MercadoPagoPaymentGateway implements PaymentGateway {
         // is that auto_return should not be relied on for pending/failure
         // paths, which this integration doesn't need it for anyway (RFC-007
         // section 17: those pages are presentation-only regardless).
-        auto_return: "approved",
+        // Omitted entirely for a local (non-publicly-routable) success
+        // URL - see isLocalUrl's comment above.
+        ...(isLocalUrl(input.backUrls.success)
+          ? {}
+          : { auto_return: "approved" as const }),
         notification_url: input.notificationUrl,
       },
     });
